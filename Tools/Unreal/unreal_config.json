@@ -1,0 +1,8 @@
+{
+  "_comment": "Optional overrides for run_unreal.ps1. Leave nulls to auto-discover: the engine comes from the .uproject's EngineAssociation via the registry, the project from the nearest .uproject above this folder. Set these only when moving Tools/Unreal somewhere unusual or pinning a specific engine build.",
+  "engine_root": null,
+  "project_file": null,
+  "engine_search_roots": [
+    "C:/Program Files/Epic Games"
+  ]
+}

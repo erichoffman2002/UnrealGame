@@ -1,0 +1,25 @@
+# ── Unreal generated ────────────────────────────────────────────────
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+*.VC.db
+*.opensdf
+*.sdf
+*.sln
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# Stale backup of the bridge plugin binaries
+Plugins/UE_MCP_Bridge/Binaries.bak-prefab/
+
+# ── Model / content packs (NOT ours, ~16 GB of Epic source assets) ──
+Content/ParagonProps/
+Content/KiteDemo/
+Content/SampleMap/
+Content/Characters/
+
+# ── Local tooling output ────────────────────────────────────────────
+Tools/Unreal/logs/
+Tools/Unreal/output/

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ue-mcp": {
+      "command": "npx",
+      "args": [
+        "ue-mcp",
+        "C:/MyLocalPrograms/Unreal Engine/MCP_Test_Project/MyProject.uproject"
+      ]
+    }
+  }
+}
