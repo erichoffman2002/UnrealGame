@@ -152,6 +152,13 @@ These cost real debugging time; check them before inventing a new theory.
   which the Water plugin raises the first time a Water Body is placed on a landscape.
   Never arm a pattern that could match a save prompt: the policy presses the button
   without anyone reading the warning, so unsaved work can be discarded silently.
+  **An armed policy does not help in an interactive session.** Arming
+  `"Message Log"` -> `CLEAR` was verified to have no effect here: the bridge still
+  reported `dialogMode: "interactive"` and routed the dialog to the person on every
+  call, refusing each action until they answered. The policy is for *unattended* runs
+  only. In an interactive session a recurring modal will interrupt every PIE cycle, and
+  the practical fix is to close or undock the offending window in the editor.
+  *Verified 2026-09-17, UE 5.8.*
 - **Material usage flags revert unless the material is saved.** The engine sets
   flags like `InstancedStaticMeshes` and `bUsedWithNanite` in memory at load, so the
   material looks correct in-session while the `.uasset` on disk still lacks them —
@@ -165,7 +172,12 @@ These cost real debugging time; check them before inventing a new theory.
   in the level on its old value - `GetMass()` still returned the previous 747 kg after
   the Blueprint was set to 500. There is no refresh action; delete the instance and
   place it again. Until you do, every runtime measurement you take is measuring the
-  stale actor, which quietly invalidates whatever experiment you were running.
+  stale actor, which quietly invalidates whatever experiment you were running. It also
+  covers a component you **add** to the Blueprint: the new component does appear on the
+  placed instance, but every default you configured on it does not. A NiagaraComponent
+  added and pointed at a system read back `Asset: null`, `bAutoActivate: true` and scale
+  `1,1,1` on the existing actor while the Blueprint template held the correct values - so
+  the logic ran, set its flags, and activated nothing. Re-place the actor.
   **Scope this carefully:** it applies to *property and component defaults*. A change to
   a Blueprint's **graph logic** does reinstance on compile, so re-placing an actor will
   not fix a function that behaves wrongly — if the logic is still wrong after a compile,
