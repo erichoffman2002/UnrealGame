@@ -166,6 +166,13 @@ These cost real debugging time; check them before inventing a new theory.
   the Blueprint was set to 500. There is no refresh action; delete the instance and
   place it again. Until you do, every runtime measurement you take is measuring the
   stale actor, which quietly invalidates whatever experiment you were running.
+  **Scope this carefully:** it applies to *property and component defaults*. A change to
+  a Blueprint's **graph logic** does reinstance on compile, so re-placing an actor will
+  not fix a function that behaves wrongly — if the logic is still wrong after a compile,
+  the bug is in the graph, not in the instance. Re-placing to "fix" logic wastes a cycle
+  and, worse, makes you stop looking. The one class-level case that does need a manual
+  step is `blueprint(set_class_default)`: it writes the CDO, reads back correctly from the
+  asset, and still does not reach newly spawned instances until the Blueprint is compiled.
   *Verified 2026-09-17, UE 5.8.*
 - **`material(set_usage)` reports success without writing.** It returns
   `updated: true` while a read-back shows the flag unchanged. Set the underlying
@@ -173,6 +180,14 @@ These cost real debugging time; check them before inventing a new theory.
   matching `bUsedWith*` flag) with `save=true` - then read it back. This compounds
   with the usage-flag gotcha above: the reported success and the in-memory value can
   agree while the `.uasset` has neither. *Verified 2026-09-17, UE 5.8.*
+- **A reported success is not evidence that anything was written.** Beyond
+  `material(set_usage)`: the `epic_*` toolset wrappers return `returnValue: null` on a
+  successful write and say nothing about what changed, and the Blueprint graph DSL
+  resolves an **unrecognised enum string to index 0 instead of erroring** — passing a
+  collision channel as `"Visibility"` writes `ECC_WorldStatic`, compiles clean, and the
+  feature simply never works. Read back after every write that matters, and for runtime
+  behaviour read back off the **live PIE object** (`editor(get_runtime_values)`,
+  `editor(invoke_object_function)`) rather than the asset. *Verified 2026-09-17, UE 5.8.*
 
 - **Components can't be created from Python directly.** `add_component_by_class`
   isn't exposed and a `new_object` component won't persist. Use
@@ -182,10 +197,17 @@ These cost real debugging time; check them before inventing a new theory.
   renders as the default checkerboard on an ISM/HISM. The KiteDemo `GroundTiles`
   instances have this problem, which is why the scene builds its own
   `M_RuinGround`.
-- **SceneCapture2D is not representative.** It renders without resolved Lumen GI
-  and without waiting for texture streaming, giving flat, black-shadowed images.
-  Use the editor viewport + `HighResShot` (see `ViewportShooter`) for anything
-  you intend to judge visually.
+- **Pick the capture path deliberately; two of them can report success and show you
+  nothing.** SceneCapture2D renders without resolved Lumen GI and without waiting for
+  texture streaming, and `editor(capture_scene_png)` — which uses it — **does not draw
+  Niagara particles at all**, so an empty frame is not evidence that an effect is broken.
+  `capture_screenshot` with `target="editor"` and `HighResShot` both *silently wrote no
+  file* when the editor window was not redrawing in the background. The dependable path
+  for anything you intend to judge visually is a PIE session plus
+  `editor(capture_screenshot, target="pie")`. Also note editor viewports default to
+  **realtime OFF**, so nothing simulates until `editor(set_realtime, enabled=true)` — a
+  "broken" effect is often a viewport that never ticked. Full table and the PIE lifecycle
+  traps are in the `ue-mcp-workflow` skill. *Verified 2026-09-17, UE 5.8.*
 - **Force textures resident before capturing**, via
   `MaterialInterface.set_force_mip_levels_to_be_resident`, or you capture the
   lowest mip — a flat average colour.

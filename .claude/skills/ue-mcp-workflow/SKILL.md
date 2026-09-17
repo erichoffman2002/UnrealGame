@@ -42,6 +42,59 @@ For any write action:
 - **`execute_python` is an escape hatch, not a shortcut** - if a native tool exists for the job, use it. When you use `execute_python`, a hook may prompt you to file a GitHub issue so the native tool gap can be closed.
 - **Editor must be fully loaded** for asset registry queries. If a `list_*` action retries with "still initializing", the editor is still starting - wait a few seconds and retry.
 
+## PIE lifecycle: the traps that invalidate a test
+
+Most wasted effort in a visual/runtime session comes from testing the wrong state, not
+from the change being wrong.
+
+- **`play_in_editor(start)` returns `success: false` when a session is already running.**
+  That stale session predates your edits, so anything you measure in it is the OLD build.
+  After any asset edit, always: `stop` -> poll `status` until `isPlaying: false` -> `start`.
+- **Stop is deferred.** Both start and stop take effect on a later editor tick. Poll
+  `play_in_editor(pieAction="status")` rather than assuming.
+- **`level(save)` is refused while PIE runs** ("stop it before saving the level"). Stop
+  first, then save, then restart if you still need it.
+- **Edit assets with PIE stopped.** A Blueprint or Niagara edit applied mid-session may or
+  may not reach the running world.
+
+## Verifying something visually
+
+Pick the capture path deliberately - they do not show the same thing, and two of them can
+report success while producing nothing useful.
+
+| Path | Shows | Watch out |
+|---|---|---|
+| `editor(capture_scene_png)` | editor world, correct lighting/foliage/water | **Does not draw Niagara particles.** An empty frame is not evidence |
+| `editor(capture_screenshot, target="pie")` | the real game viewport incl. particles and UMG | needs a PIE session; the reliable default for judging VFX |
+| `editor(capture_screenshot, target="editor")` / `HighResShot` | editor viewport | **silently wrote no file** when the editor window was not redrawing in the background - check the file exists |
+
+- **Editor viewports default to realtime OFF.** Nothing simulates - no Niagara, no
+  animation - until `editor(set_realtime, enabled=true)`. A "broken" effect is often just
+  a viewport that never ticked.
+- **`filename` on `capture_screenshot` is already relative to `Saved/Screenshots`.**
+  Passing `"Saved/Screenshots/x.png"` doubles the prefix and the file lands elsewhere.
+- **Comparing an editor capture against a PIE capture from the same pose** is how you
+  prove an artifact is runtime-only, which narrows it to something spawned rather than
+  something authored.
+
+*Verified 2026-09-17, UE 5.8.*
+
+## A write reporting success is not evidence
+
+This bridge has several actions that report success while writing nothing. Read back
+after every write that matters:
+
+- `material(set_usage)` returns `updated: true`, flag unchanged.
+- The `epic_*` toolset wrappers return `returnValue: null` on a successful write and say
+  nothing about what changed.
+- The Blueprint graph DSL resolves an **unrecognised enum string to index 0** rather than
+  erroring - `"Visibility"` becomes `ECC_WorldStatic`. Compiles clean, does nothing.
+- `level(set_water_body_property)` and friends - see the water skill.
+
+The general rule: the read-back is the assertion, and for runtime behavior the read-back
+belongs on the **live PIE object** (`editor(get_runtime_values)`,
+`editor(invoke_object_function)`), not on the asset.
+
 ## When something truly can't be done
 
 If no native action covers your case:
