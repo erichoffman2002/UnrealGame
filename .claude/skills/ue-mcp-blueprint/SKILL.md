@@ -61,6 +61,14 @@ The DSL authors and compiles an entire graph in a single round-trip, which is ma
 - **A `b`-prefixed variable loses the prefix in the node id.** `bLit` is
   `Variables|Default|GetLit` / `SetLit`, `bIgnited` is `GetIgnited`.
 
+- **An unrecognised enum string silently becomes index 0.** Passing `:Channel "Visibility"`
+  to `SetCollisionResponseToChannel` does not error - it writes `ECC_WorldStatic`, and the
+  Visibility channel keeps whatever it had. The write reports success, the graph compiles
+  clean, and the only symptom is that nothing works. Always pass the full enumerator
+  (`ECC_Visibility`, `ECR_Block`, `QueryOnly`), and **read the graph back** with
+  `epic_read_graph_dsl` after writing: it prints the value that actually landed, which is
+  the cheapest way to catch this.
+
 - **Node ids are `Category|Subcategory|Name` and the category is not always obvious.**
   `SceneComponent::SetVisibility` is `Rendering|SetVisibility`, NOT
   `Rendering|Component|SetVisibility`. Look the id up rather than guessing - see below.
@@ -136,9 +144,22 @@ Three things must all be true, and none of them reports an error when missing:
    become a wall the player collides with.
 3. The cursor is actually shown (`bShowMouseCursor`) and the input mode allows UI hits.
 
-Confirm at runtime rather than by inspection: read `bEnableClickEvents`,
-`CurrentClickTraceChannel` and the component's `BodyInstance.CollisionEnabled` off the
-live PIE objects with `editor(get_runtime_values)`.
+Confirm at runtime rather than by inspection, and note that reading
+`BodyInstance.CollisionEnabled` is **not** enough - it can say `QueryOnly` while the
+channel response is still Ignore. The two checks that actually settle it:
+
+```
+editor(invoke_object_function, objectPath="<pie path>:...ClickBox",
+       functionName="GetCollisionResponseToChannel", args={Channel: "ECC_Visibility"})
+   -> must be ECR_Block
+
+level(line_trace, world="pie", channel="Visibility",
+      start=<camera>, end=<the box>)
+   -> must report hit on your actor and component
+```
+
+A trace that reports `hit: false` along a ray ending inside the box is the whole
+diagnosis: the primitive is not blocking that channel.
 
 ## Interfaces + event dispatchers
 
