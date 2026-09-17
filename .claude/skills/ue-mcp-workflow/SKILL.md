@@ -61,6 +61,7 @@ This skill is the entry point. Once oriented, load the one that matches the task
 | `ue-mcp-blueprint` | Blueprint graphs, components, CDO, interfaces, dispatchers |
 | `ue-mcp-pcg-vegetation` | Scattering vegetation/rocks/trees on a Landscape via PCG |
 | `ue-mcp-niagara` | Niagara systems, emitters, renderers, HLSL modules |
+| `ue-mcp-water` | Rivers/lakes/oceans, water zones, flow direction, buoyancy |
 | `ue-mcp-animation` | IK Rig/Retargeter, Control Rig, baking, bone analysis |
 | `ue-mcp-native-cpp` | Native C++ UCLASSes (not used in this Blueprint-only project) |
 

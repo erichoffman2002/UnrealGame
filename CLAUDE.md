@@ -111,7 +111,7 @@ The MCP layer (now the primary interface):
 - `.mcp.json` — project-scoped `ue-mcp` server declaration.
 - `Plugins/UE_MCP_Bridge/` — the C++ bridge plugin it talks to.
 - `.claude/skills/ue-mcp-*` — per-domain playbooks: workflow, epic-routing,
-  blueprint, animation, niagara, native-cpp, pcg-vegetation.
+  blueprint, animation, niagara, native-cpp, pcg-vegetation, water.
 - Epic's UE 5.8 Toolset Registry is enabled (`ToolsetRegistry` + `AllToolsets`
   in the .uproject), surfacing ~830 `epic_*` actions across the categories.
 - `/Game/MCP_Test/LandscapeTest` — disposable landscape/PCG test level with
@@ -131,6 +131,13 @@ These cost real debugging time; check them before inventing a new theory.
   vegetation with the `pcg` category instead — see the `ue-mcp-pcg-vegetation`
   skill. *Verified 2026-09-16, UE 5.8 / ue-mcp bridge API v1; recheck after an
   upgrade.*
+- **A water body created through ue-mcp gets no materials.** `WaterMaterial`,
+  `WaterInfoMaterial` and `WaterLODMaterial` are all `None` - the editor UI assigns
+  them when you place one by hand, the programmatic path does not. `WaterInfoMaterial`
+  is what writes velocity into the water info texture, so without it a river renders
+  but can never flow correctly no matter what the spline says. Water work has its own
+  playbook: see the `ue-mcp-water` skill, which also covers the landscape-edit ordering
+  that crashes the editor. *Verified 2026-09-17, UE 5.8.*
 - **Save the level at every stage of a long build.** An editor crash loses all
   unsaved in-memory work; assets saved individually survive, the `.umap` does not.
   `level(save)` after each major step costs nothing.
