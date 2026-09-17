@@ -20,6 +20,66 @@ The DSL authors and compiles an entire graph in a single round-trip, which is ma
 
 **Keep using the native actions for** read/discovery, SCS components, CDO/class defaults, interfaces + event dispatchers, structured `compile`/`validate`, and anything with no Epic equivalent - the native path adds idempotency and rollback the raw tools lack. See the `ue-mcp-epic-routing` skill for the full epic-vs-native decision.
 
+### DSL gotchas that cost real time
+
+- **`bind` on a PURE node does not cache the value.** It names the node, not a snapshot.
+  Every consumer re-pulls it at the moment that consumer executes. So this silently
+  inverts itself:
+
+  ```
+  (bind newState (not (Variables|Default|GetLit)))
+  (Variables|Default|SetLit newState)      ; Lit is now newState
+  (if newState ...)                        ; Branch RE-PULLS: not(GetLit) == old value!
+  ```
+
+  The Branch reads the value back *after* the Set, so the condition is the opposite of
+  what you wrote and the same arm runs every time. The docs' "REUSE VALUES WITH BIND"
+  advice is about avoiding duplicate nodes; it does not make a pure node's value stable
+  across a write to its input.
+
+  **Fix:** branch on the current value and do the write inside each arm, so the condition
+  is evaluated before anything mutates it:
+
+  ```
+  (if (Variables|Default|GetLit)
+    (Variables|Default|SetLit false)
+    ...off...
+    (else
+      (Variables|Default|SetLit true)
+      ...on...))
+  ```
+
+  This is invisible in the graph: exec wiring and data wiring both read as correct, and
+  `get_connections` confirms `NOT -> Branch.Condition`. Only runtime shows it. If a
+  Blueprint's logic is inverted or one arm never fires, check for a pure node feeding a
+  branch whose input was written earlier in the same flow.
+
+- **A statement after an `(if ...)` is not reached.** The branch terminates the enclosing
+  exec flow, exactly as a multi-exec node does. Anything meant to run in both cases has
+  to be duplicated into both arms.
+
+- **A `b`-prefixed variable loses the prefix in the node id.** `bLit` is
+  `Variables|Default|GetLit` / `SetLit`, `bIgnited` is `GetIgnited`.
+
+- **Node ids are `Category|Subcategory|Name` and the category is not always obvious.**
+  `SceneComponent::SetVisibility` is `Rendering|SetVisibility`, NOT
+  `Rendering|Component|SetVisibility`. Look the id up rather than guessing - see below.
+
+- **Event ids come from the palette, not the UFUNCTION name.**
+  `list_overridable_functions` reports `ReceiveActorOnClicked`, but the DSL wants
+  `MouseInput|EventActorOnClicked`. Get the real list with:
+
+  ```
+  blueprint(epic_find_node_types, graph="<bp path>:EventGraph",
+            type_id_filter="AddEvent|", context_pins=[])
+  ```
+
+  The same call with other filters is the fastest way to resolve any node id.
+
+- **Component-bound events (a component's own OnClicked) cannot be expressed in the DSL**,
+  and a DSL write replaces the whole graph, so it would drop any you added separately.
+  Prefer the actor-level equivalents above, which are ordinary events.
+
 ## Discovery before authoring
 
 For any existing Blueprint:
@@ -55,6 +115,30 @@ For any existing Blueprint:
 ## CDO (class defaults)
 
 - `set_class_default` writes a UPROPERTY on the Blueprint CDO (the class default object). For actor tick settings specifically, use `set_actor_tick_settings` - it handles `bCanEverTick`, `bStartWithTickEnabled`, `TickInterval` in one call.
+- **A `set_class_default` write does not reach instances until the Blueprint is compiled.**
+  The write lands on the CDO and reads back correctly from the asset, while every spawned
+  instance - including the one PIE creates next - still carries the old value. Follow any
+  `set_class_default` with `blueprint(action="compile")`, then read the value off the live
+  object to confirm. Verified 2026-09-17 on `bEnableClickEvents`, UE 5.8.
+
+### Making an actor clickable / hoverable
+
+Three things must all be true, and none of them reports an error when missing:
+
+1. The **PlayerController** has `bEnableClickEvents` and `bEnableMouseOverEvents` set
+   (then compiled - see above). Find the right controller via the GameMode's
+   `PlayerControllerClass`, not by assuming the engine default.
+2. A primitive on the actor **blocks the controller's click trace channel**, which is
+   `DefaultClickTraceChannel` (`ECC_Visibility` by default). A collision box added through
+   the SCS will not do this on its own. Setting it in BeginPlay is the reliable route:
+   `SetCollisionEnabled(QueryOnly)`, `SetCollisionResponseToAllChannels(Ignore)`,
+   `SetCollisionResponseToChannel(Visibility, Block)` - query-only so it does not also
+   become a wall the player collides with.
+3. The cursor is actually shown (`bShowMouseCursor`) and the input mode allows UI hits.
+
+Confirm at runtime rather than by inspection: read `bEnableClickEvents`,
+`CurrentClickTraceChannel` and the component's `BodyInstance.CollisionEnabled` off the
+live PIE objects with `editor(get_runtime_values)`.
 
 ## Interfaces + event dispatchers
 
