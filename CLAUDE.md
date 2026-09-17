@@ -160,6 +160,20 @@ These cost real debugging time; check them before inventing a new theory.
   After any usage-flag or Nanite change, run `editor(list_dirty_packages)` and
   `asset(save_all_dirty)`, then confirm the `.uasset` mtime actually moved.
 
+- **A placed actor ignores Blueprint changes until it is re-placed.** Editing a
+  property on the Blueprint (mass, a component default) leaves every instance already
+  in the level on its old value - `GetMass()` still returned the previous 747 kg after
+  the Blueprint was set to 500. There is no refresh action; delete the instance and
+  place it again. Until you do, every runtime measurement you take is measuring the
+  stale actor, which quietly invalidates whatever experiment you were running.
+  *Verified 2026-09-17, UE 5.8.*
+- **`material(set_usage)` reports success without writing.** It returns
+  `updated: true` while a read-back shows the flag unchanged. Set the underlying
+  property instead - `editor(set_property)` on `bUsedWithNiagaraSprites` (or the
+  matching `bUsedWith*` flag) with `save=true` - then read it back. This compounds
+  with the usage-flag gotcha above: the reported success and the in-memory value can
+  agree while the `.uasset` has neither. *Verified 2026-09-17, UE 5.8.*
+
 - **Components can't be created from Python directly.** `add_component_by_class`
   isn't exposed and a `new_object` component won't persist. Use
   `SubobjectDataSubsystem.add_new_subobject` with `blueprint_context=None` to

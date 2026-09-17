@@ -47,8 +47,14 @@ reflection(reflect_instance,
 |---|---|---|
 | `WaterMaterial` | no surface renders | `/Water/Materials/WaterSurface/Water_Material_River` |
 | **`WaterInfoMaterial`** | **velocity never reaches the surface - the river cannot flow** | `/Water/Materials/WaterInfo/DrawWaterInfo` |
-| `WaterLODMaterial` | no distant water | `/Water/Materials/WaterSurface/LODs/Water_Material_River_LOD` |
+| `WaterLODMaterial` | no distant water - **distant sections render as dark untextured planks following the river** | `/Water/Materials/WaterSurface/LODs/Water_Material_River_LOD` |
+| `WaterStaticMeshMaterial` | the body's `SplineMeshComponent`s render unshaded - same dark-plank symptom | the same instance you gave `WaterMaterial` |
 | `UnderwaterPostProcessMaterial` | no underwater tint | `/Water/Materials/PostProcessing/M_UnderWater_PostProcess_Volume` |
+
+The two dark-plank slots are easy to misread as a broken VFX or a stray mesh: what you
+see is a long, thin, hard-edged grey bar lying along the river and entering the water at
+an angle. Check these slots before you go hunting for the "object". *Verified
+2026-09-17, UE 5.8.*
 
 `WaterInfoMaterial` draws the body into the WaterZone's **water info texture**, which is
 where the surface shader reads velocity from. With it unset, depth still reaches the
@@ -140,6 +146,83 @@ Write the **whole** `FBuoyancyData` struct - a partial write clears the rest.
 `WaterVelocityStrength` scales how hard the current pushes the actor: at velocity 800
 use about 0.015, or the boat launches downstream.
 
+### The prerequisites, in the order they bite
+
+All four are silent. Check them before touching pontoon numbers.
+
+1. **The mesh must be the actor's ROOT component.** `BuoyancyComponent.cpp:70` does
+   `SimulatingComponent = Cast<UPrimitiveComponent>(Owner->GetRootComponent())`. A plain
+   `SceneComponent` root returns null and buoyancy never runs at all. No native ue-mcp
+   action promotes a component to root - `reparent_component` needs an existing parent,
+   and deleting `DefaultSceneRoot` just makes the editor recreate it. Use
+   `SubobjectDataSubsystem.make_new_scene_root` through `editor(run_python_file)`.
+2. **`Mass (kg)` must be enabled** (`BodyInstance.bOverrideMass = true`). Epic's docs
+   state this outright. Inheriting computed mass is not equivalent.
+3. **`Simulate Physics` on**, and spawn the actor **above** the water surface, not
+   tangent to it.
+4. **A stale per-instance override can mask a correct Blueprint.** A placed actor here
+   carried `Pontoons=` (empty) while the Blueprint had four good pontoons. Always read
+   the *instance*, not just the template.
+
+### When the overlap gate never fires
+
+Everything in `UpdatePontoons` is wrapped in `if (bIsOverlappingWaterBody)`, and that
+flag is set **only** by `AWaterBody::NotifyActorBeginOverlap`. No pontoon or coefficient
+tuning can substitute for it, and `EnteredWaterBody()` is not a `UFUNCTION`, so nothing
+in Blueprint can set the flag directly.
+
+On this project that overlap never fired, with every documented requirement satisfied and
+the collision filters verified correct at runtime (hull `WorldDynamic`/Block-to-WorldStatic
+vs water `WorldStatic`/Overlap-to-WorldDynamic resolves to Overlap). Results were also
+**not reproducible** - the same actor at the same coordinates floated once and sank after.
+
+Two checks worth doing *once* before you give up on the engine component:
+
+- **`[/Script/Engine.CollisionProfile]` may be missing entirely from
+  `Config/DefaultEngine.ini`.** The Water plugin expects a `WaterBodyCollision` profile
+  (`WorldStatic`, Overlap to `Pawn`/`PhysicsBody`/`Vehicle`/`WorldDynamic`). A project
+  that never opened the collision settings UI has no `[CollisionProfile]` block at all, so
+  the profile resolves to a default. Adding it is cheap and correct regardless; it did not
+  fix this case.
+- **Turn on the engine's own buoyancy debug draw:**
+  ```
+  r.Water.UseBuoyancyAsyncPath 0     # the debug draw only runs on the sync path
+  r.Water.DebugBuoyancy 1
+  r.Water.BuoyancyDebugPoints 16
+  r.Water.BuoyancyDebugSize 20
+  ```
+  Now read the result carefully: **that draw call sits *inside* `if (bIsOverlappingWaterBody)`.**
+  So seeing nothing is not a failure of the debug command - it *is* the diagnostic, and it
+  confirms the gate rather than the pontoon maths. Do not keep re-tuning pontoons after
+  this comes up empty.
+
+**Do not spend hours bisecting this.** Drive buoyancy yourself instead. The water body is
+fully queryable even when overlap is broken:
+
+```
+WaterBody|GetWaterSurfaceInfoAtLocation  ->  surface location, normal, velocity, depth
+```
+
+Working recipe (see `/Game/RiverRun/Blueprints/BP_Boat`): on Tick, for four hull-corner
+offsets rotated into world space, query the surface and `AddForceAtLocation` an upward
+force proportional to submersion (clamped). Separately `AddForce` of
+`DragStrength * (waterVelocity - bodyVelocity)` - one term that both carries the boat
+downstream and damps it.
+
+Tuning that actually matters, for a 500 kg hull:
+
+- Measure the bob period to get the spring constant. Here `k = 4 x FloatStrength = 16000`
+  force-units/cm on 500 kg gives `w = sqrt(k/m) = 5.66 rad/s`, a 1.1 s period - which
+  matched the observed oscillation.
+- **Critical damping is `2*m*w` ~ 5660**, not a small number. A `DragStrength` of 400
+  looks reasonable and leaves the boat bobbing wildly.
+- **Set `BodyInstance.AngularDamping` (~4.0).** You have dropped the engine's
+  `AngularDragCoefficient`, so nothing opposes rotation. Any off-centre force accumulates
+  until the boat tumbles end over end.
+- Apply a decorative bob **at the centre of mass**. Off-centre bob forces are torque.
+
+*Verified 2026-09-17, UE 5.8.*
+
 ## After any spline, width, velocity or material change
 
 ```
@@ -165,6 +248,15 @@ a colour unit, **nothing you did reached the renderer** - and that finding is wo
 than another parameter guess.
 
 Set `Velocity Debug` back to 0 when finished. It is a visualisation mode, not a look.
+
+### Isolating a PIE-only artifact
+
+When something only appears once you press Play - a stray column, a plane, a shape in the
+water - capture the **editor viewport from the player's exact spawn position and rotation**
+and compare. If the artifact is absent there, it is genuinely runtime-only (a spawned
+actor, a Niagara system, a Blueprint-driven component) and no amount of inspecting
+materials, meshes or water slots in the editor will find it. That single comparison is
+worth more than a run of parameter guesses, and it is cheap.
 
 ## Guardrails
 
